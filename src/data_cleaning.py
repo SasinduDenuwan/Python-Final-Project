@@ -1,101 +1,136 @@
-# data_cleaning.py
-
 import pandas as pd
 import numpy as np
+import os
 
-def load_data(data_path='diabetic_data.csv', mapping_path='IDs_mapping.csv', na_values='?'):
-    """
-    Load the diabetic data and replace '?' with NaN.
-    """
-    df = pd.read_csv(data_path, na_values=na_values)
-    mapping_df = pd.read_csv(mapping_path)
-    return df, mapping_df
+# ---------------- PATH CONFIGURATION ---------------- #
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_DATA_PATH = os.path.join(SCRIPT_DIR, "..", "data", "raw", "diabetic_data.csv")
+ID_MAP_PATH = os.path.join(SCRIPT_DIR, "..", "data", "raw", "IDs_mapping.csv")
+OUTPUT_PATH = os.path.join(SCRIPT_DIR, "..", "data", "processed", "cleaned_data.csv")
 
-def assess_data(df):
-    """
-    Perform initial assessment: info, describe, head, columns.
-    """
-    print(df.info())
-    print(df.describe())
-    print(df.head())
-    print(df.columns)
-    # Convert potential categorical columns
-    categorical_cols = ['admission_type_id', 'discharge_disposition_id', 'admission_source_id']
-    df[categorical_cols] = df[categorical_cols].astype('category')
+
+def load_data():
+    """Load raw diabetes dataset with standardized NaNs."""
+    df = pd.read_csv(RAW_DATA_PATH)
+    df.replace("?", np.nan, inplace=True)
     return df
 
-def handle_missing_weight(df, threshold=0.9):
-    """
-    Check missingness in weight column and drop if >90%.
-    """
-    missing_ratio = df['weight'].isna().mean()
-    print(f"Weight missing ratio: {missing_ratio}")
-    if missing_ratio > threshold:
-        df = df.drop(columns=['weight'])
-        print("Dropped 'weight' column due to high missingness.")
-    return df
 
-def filter_deceased_patients(df, mapping_df):
+def drop_high_missing_columns(df):
+    """Drop columns with excessive missing values (>90%)."""
+    cols_to_drop = ["weight", "payer_code", "medical_specialty"]
+    return df.drop(columns=[c for c in cols_to_drop if c in df.columns])
+
+
+def remove_deceased_patients(df):
     """
-    Identify and filter out deceased patients using discharge_disposition_id.
+    Remove patients who expired during hospital stay.
+    Discharge disposition IDs indicating death: 11, 19, 20
     """
-    # Extract discharge mapping
-    discharge_mapping = mapping_df[mapping_df['admission_type_id'].isna() & mapping_df['description'].notna()]
-    expired_codes = discharge_mapping[discharge_mapping['description'].str.contains('Expired', na=False)]['discharge_disposition_id'].dropna().astype(int).tolist()
-    print(f"Expired codes: {expired_codes}")
-    df = df[~df['discharge_disposition_id'].isin(expired_codes)]
-    print(f"Filtered out deceased patients.")
-    return df
+    deceased_ids = [11, 19, 20]
+    return df[~df["discharge_disposition_id"].isin(deceased_ids)]
+
 
 def remove_duplicates(df):
-    """
-    Remove exact duplicate rows.
-    """
-    duplicates = df.duplicated().sum()
-    print(f"Number of duplicate rows: {duplicates}")
-    df = df.drop_duplicates()
+    """Remove exact duplicate rows."""
+    return df.drop_duplicates()
+
+
+def map_admission_type(df):
+    """Map admission type IDs to human-readable categories."""
+    admission_map = {
+        1: "Emergency",
+        2: "Urgent",
+        3: "Elective",
+        4: "Newborn",
+        5: "Not Available",
+        6: "NULL",
+        7: "Trauma Center",
+        8: "Not Mapped"
+    }
+    df["admission_type"] = df["admission_type_id"].map(admission_map)
     return df
 
-def map_ids_to_descriptions(df, mapping_df):
-    """
-    Map admission_type_id, discharge_disposition_id, admission_source_id to descriptions.
-    """
-    # Split mapping_df into sections
-    admission_type = mapping_df[mapping_df['admission_type_id'].notna()][['admission_type_id', 'description']].dropna(how='all')
-    discharge_disp = mapping_df[mapping_df['discharge_disposition_id'].notna()][['discharge_disposition_id', 'description']].dropna(how='all')
-    admission_source = mapping_df[mapping_df['admission_source_id'].notna()][['admission_source_id', 'description']].dropna(how='all')
-    
-    # Clean and convert
-    admission_type['admission_type_id'] = pd.to_numeric(admission_type['admission_type_id'], errors='coerce')
-    discharge_disp['discharge_disposition_id'] = pd.to_numeric(discharge_disp['discharge_disposition_id'], errors='coerce')
-    admission_source['admission_source_id'] = pd.to_numeric(admission_source['admission_source_id'], errors='coerce')
-    
-    admission_type = admission_type.dropna(subset=['admission_type_id'])
-    discharge_disp = discharge_disp.dropna(subset=['discharge_disposition_id'])
-    admission_source = admission_source.dropna(subset=['admission_source_id'])
-    
-    # Create dicts
-    adm_type_dict = dict(zip(admission_type['admission_type_id'], admission_type['description']))
-    disp_dict = dict(zip(discharge_disp['discharge_disposition_id'], discharge_disp['description']))
-    adm_source_dict = dict(zip(admission_source['admission_source_id'], admission_source['description']))
-    
-    # Map to new columns
-    df['admission_type_desc'] = df['admission_type_id'].map(adm_type_dict)
-    df['discharge_disposition_desc'] = df['discharge_disposition_id'].map(disp_dict)
-    df['admission_source_desc'] = df['admission_source_id'].map(adm_source_dict)
-    
+
+def encode_target_variable(df):
+    """Binary encoding: 1 = readmitted, 0 = not readmitted."""
+    df["readmitted_binary"] = df["readmitted"].map({
+        "NO": 0,
+        "<30": 1,
+        ">30": 1
+    })
     return df
 
-def clean_data(data_path='diabetic_data.csv', mapping_path='IDs_mapping.csv'):
-    df, mapping_df = load_data(data_path, mapping_path)
-    df = assess_data(df)
-    df = handle_missing_weight(df)
-    df = filter_deceased_patients(df, mapping_df)
+
+def clean_demographics(df):
+    """Clean gender and age columns."""
+    df = df[df["gender"].isin(["Male", "Female"])]
+
+    age_order = [
+        "[0-10)", "[10-20)", "[20-30)", "[30-40)", "[40-50)",
+        "[50-60)", "[60-70)", "[70-80)", "[80-90)", "[90-100)"
+    ]
+    df["age"] = pd.Categorical(df["age"], categories=age_order, ordered=True)
+    return df
+
+
+def encode_medications(df):
+    """Convert medication columns to binary indicators."""
+    med_cols = [
+        "metformin", "repaglinide", "nateglinide", "chlorpropamide",
+        "glimepiride", "acetohexamide", "glipizide", "glyburide",
+        "tolbutamide", "pioglitazone", "rosiglitazone", "acarbose",
+        "miglitol", "troglitazone", "tolazamide", "examide",
+        "citoglipton", "insulin", "glyburide-metformin",
+        "glipizide-metformin", "glimepiride-pioglitazone",
+        "metformin-rosiglitazone", "metformin-pioglitazone"
+    ]
+
+    for col in med_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: 0 if x == "No" else 1)
+
+    df["change"] = df["change"].map({"Ch": 1, "No": 0})
+    df["diabetesMed"] = df["diabetesMed"].map({"Yes": 1, "No": 0})
+
+    return df
+
+
+def create_primary_diabetes_flag(df):
+    """Flag primary diagnosis as diabetes (ICD-9 250.xx)."""
+    df["primary_diabetes"] = df["diag_1"].astype(str).str.startswith("250").astype(int)
+    return df
+
+
+def final_cleanup(df):
+    """Drop remaining NaNs and reset index."""
+    df = df.dropna()
+    df.reset_index(drop=True, inplace=True)
+    return df
+
+
+def run_cleaning_pipeline():
+    """Full data cleaning pipeline."""
+    print("Loading data...")
+    df = load_data()
+
+    df = drop_high_missing_columns(df)
+    df = remove_deceased_patients(df)
     df = remove_duplicates(df)
-    df = map_ids_to_descriptions(df, mapping_df)
-    # Save cleaned data
-    df.to_csv('cleaned_diabetic_data.csv', index=False)
-    return df
+    df = map_admission_type(df)
+    df = encode_target_variable(df)
+    df = clean_demographics(df)
+    df = encode_medications(df)
+    df = create_primary_diabetes_flag(df)
+    df = final_cleanup(df)
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    df.to_csv(OUTPUT_PATH, index=False)
+
+    print("Data cleaning complete")
+    print(f"Final shape: {df.shape}")
+    print(f"Saved to: {OUTPUT_PATH}")
+
 
 if __name__ == "__main__":
-    clean_data()
+    run_cleaning_pipeline()
