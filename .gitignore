@@ -13,7 +13,6 @@ env/
 ENV/
 
 # ---------------- Jupyter Notebook ----------------
-.ipynb_checkpoints/
 
 # ---------------- OS / Editor ----------------
 .DS_Store
