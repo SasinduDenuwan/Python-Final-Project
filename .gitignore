@@ -1,5 +1,5 @@
 # ---------------- Python ----------------
-__pycache__/
+_pycache_/
 *.pyc
 *.pyo
 *.pyd
@@ -21,11 +21,11 @@ Thumbs.db
 .idea/
 
 # ---------------- Data Files ----------------
-# data/raw/
+data/raw/
 data/processed/
 
 # If you want to keep folder but ignore files
-# data/raw/*
+data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
