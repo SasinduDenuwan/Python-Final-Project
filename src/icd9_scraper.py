@@ -51,5 +51,5 @@ def scrape_top_codes(codes):
         else:
             print(f"Not Found for {code}")
             descriptions[code] = "Description not found"
-        time.sleep(1) 
+        time.sleep(1)
     return descriptions
